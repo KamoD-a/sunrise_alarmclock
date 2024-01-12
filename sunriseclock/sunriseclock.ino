@@ -1,21 +1,27 @@
 #include <RTClib.h>
 #include <FastLED.h>
 
-RTC_DS3231 rtc;
 
-//LEDS
+constexpr uint32_t getSeconds(int hour, int min) {
+  return (uint32_t)(hour * 3600) + min * 60;
+}
+
 #define NUM_LEDS 60
-CRGB leds[NUM_LEDS];
 #define DATA_PIN 7
 #define BRIGHTNESS 10
 
-// event from 13:50 to 14:10
-uint8_t DAILY_EVENT_START_HH = 7; // event start time: hour
-uint8_t DAILY_EVENT_START_MM = 45; // event start time: minute
-uint8_t DAILY_EVENT_END_HH   = 8; // event end time: hour
-uint8_t DAILY_EVENT_END_MM   = 45; // event end time: minute
-uint8_t SUNRISE_LENGTH = 30;
+RTC_DS3231 rtc;
+CRGB leds[NUM_LEDS];
 
+constexpr uint8_t DAILY_EVENT_START_HH = 7; // event start time: hour
+constexpr uint8_t DAILY_EVENT_START_MM = 15; // event start time: minute
+constexpr uint8_t DAILY_EVENT_END_HH   = 9; // event end time: hour
+constexpr uint8_t DAILY_EVENT_END_MM   = 30; // event end time: minute
+constexpr uint8_t SUNRISE_LENGTH = 40;
+bool SUNRISE_COMPLETED = false;
+
+constexpr uint32_t start_time = getSeconds(DAILY_EVENT_START_HH, DAILY_EVENT_START_MM);
+constexpr uint32_t end_time = getSeconds(DAILY_EVENT_END_HH, DAILY_EVENT_END_MM);
 
 char daysOfTheWeek[7][12] = {
   "Sunday",
@@ -30,7 +36,7 @@ char daysOfTheWeek[7][12] = {
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-  Serial.println("-------NEW ATTEMPT-------");
+  // Serial.println("-------NEW ATTEMPT-------");
 
   // SETUP RTC MODULE
   if (! rtc.begin()) {
@@ -49,9 +55,6 @@ void setup() {
   rtc.disable32K();
 
   FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
-  FastLED.clear();
-  FastLED.show();
-
   FastLED.clear();  // clear all pixel data
   FastLED.show();
 
@@ -59,88 +62,48 @@ void setup() {
   Serial.println("Setup done. \n");
 }
 
-
-void startupLEDsTest() {
-  // startup blink test to confirm LEDs are working.
-  FastLED.setBrightness(32);
-  fill_solid(leds, NUM_LEDS, CRGB(255,0,0));  // fill red
-  FastLED.show();
-  delay(1000);
-  fill_solid(leds, NUM_LEDS, CRGB(0,255,0));  // fill green
-  FastLED.show();
-  delay(1000);
-  fill_solid(leds, NUM_LEDS, CRGB(0,0,255));  // fill blue
-  FastLED.show();
-  delay(1000);
-  FastLED.clear();
-  FastLED.show();
-  //FastLED.setBrightness(BRIGHTNESS);
-
-} //end_startupLEDsTest
-
 void loop() {
-  // put your main code here, to run repeatedly:
   DateTime now = rtc.now();
   int now_in_seconds = getSeconds(now.hour(), now.minute());
-  int start = getSeconds(DAILY_EVENT_START_HH, DAILY_EVENT_START_MM);
-  int end = getSeconds(DAILY_EVENT_END_HH, DAILY_EVENT_END_MM);
-  Serial.println(start);
-  Serial.println(end);
-  Serial.println(now_in_seconds);
-  if (now_in_seconds >= start &&
-      now_in_seconds < end) {
-    Serial.println("It is on scheduled time");
-    // TODO: write your code"
-    sunrise(SUNRISE_LENGTH);
-    FastLED.show(); 
-    blinkLed();
-    fill_solid(leds, NUM_LEDS, CRGB(255,255,255));
-    FastLED.show();
-  } else {
-    Serial.println("It is NOT on scheduled time");
-    printTime(now);
-    delay(2000);
-    //blinkLed();
-    FastLED.clear();
-  }
-
-  //printTime(now);
-}
-
-
-int getSeconds(int hour, int min) {
-  return hour * 3600 + min * 60;
-}
-
-void sunrise(int length) {
-  Serial.println("Sunrise started");
   
-  // total sunrise length, in minutes
-  static const uint8_t sunriseLength = length;
-
-  // how often (in seconds) should the heat color increase?
-  // for the default of 30 minutes, this should be about every 7 seconds
-  // 7 seconds x 256 gradient steps = 1,792 seconds = ~30 minutes
-  static const uint8_t interval = (sunriseLength * 60) / 256;
-
-  // current gradient palette color index
-  static uint8_t heatIndex = 0; // start out at 0
-  Serial.println(heatIndex);
-
-  // HeatColors_p is a gradient palette built in to FastLED
-  // that fades from black to red, orange, yellow, white
-  // feel free to use another palette or define your own custom one
-  CRGB color = ColorFromPalette(HeatColors_p, heatIndex);
-
-  // fill the entire strip with the current color
-  fill_solid(leds, NUM_LEDS, color);
-
-  // slowly increase the heat
-  EVERY_N_SECONDS(interval) {
-    // stop incrementing at 255, we don't want to overflow back to 0
-    if(heatIndex < 255) {
-      heatIndex++;
+  if (now_in_seconds >= start_time &&
+      now_in_seconds < end_time) {
+    if (SUNRISE_COMPLETED == false){
+      sunrise();
+    } else {
+      fill_solid(leds, NUM_LEDS, CRGB(255,255,255));
     }
+  } else {
+    delay(2000);
+    fill_solid(leds, NUM_LEDS, CRGB(0,0,0));
+    FastLED.show();
+    SUNRISE_COMPLETED = false;
+  }
+}
+
+void sunrise() {
+  Serial.println("Sunrise started");
+
+  const uint8_t interval = (SUNRISE_LENGTH * 60) / 256;
+
+  static uint8_t heatIndex = 0; // start out at 0
+
+
+  do 
+  {
+    CRGB color = ColorFromPalette(HeatColors_p, heatIndex);
+
+    fill_solid(leds, NUM_LEDS, color);
+    FastLED.show();
+
+    heatIndex++;
+
+    delay(interval * 1000uL);
+
+  } while(heatIndex < 255);
+
+  if (heatIndex == 255) {
+    SUNRISE_COMPLETED = true;
   }
 }
 
@@ -167,3 +130,21 @@ void blinkLed(){
   digitalWrite(12, LOW); // LED off on output 8
   delay(500);
 }
+
+void startupLEDsTest() {
+  // startup blink test to confirm LEDs are working.
+  FastLED.setBrightness(32);
+  fill_solid(leds, NUM_LEDS, CRGB(255,0,0));  // fill red
+  FastLED.show();
+  delay(1000);
+  fill_solid(leds, NUM_LEDS, CRGB(0,255,0));  // fill green
+  FastLED.show();
+  delay(1000);
+  fill_solid(leds, NUM_LEDS, CRGB(0,0,255));  // fill blue
+  FastLED.show();
+  delay(1000);
+  FastLED.clear();
+  FastLED.show();
+  //FastLED.setBrightness(BRIGHTNESS);
+
+} //end_startupLEDsTest
